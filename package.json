@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/bot.js",
-    "check": "node --check src/bot.js && node --check src/community.js && node --check src/dashboard.js && node --check dashboard/app.js",
+    "check": "node --check src/bot.js && node --check src/community.js && node --check src/runtime-settings.js && node --check src/dashboard.js && node --check dashboard/app.js",
     "dashboard": "node src/dashboard.js",
     "admin:setup": "node scripts/create-admin-credentials.js"
   },
