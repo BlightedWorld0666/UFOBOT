@@ -36,3 +36,17 @@ Data is stored in `data/members.json` and removed on `/unlink`. For a larger pub
 
 ## Riot rank reality
 Existing Discord↔Riot connected accounts aren't generally readable as Riot authentication credentials by third-party Discord bots. The official Valorant API documents player match histories after authorized opt-in and top ladder leaderboards, **not a general current competitive-rank endpoint**. `/sync` only rechecks the account identifier; it never fabricates a rank. Planned verified OAuth login requires Riot production RSO approval. Rank notifications are manually staff-triggered until an authorized rank provider exists.
+
+## UFO Bot community expansion
+The bot is now named **UFO Bot**, source: https://github.com/BlightedWorld0666/UFOBOT. Public information: https://blighted.world/ufobot/ ; privacy: https://blighted.world/ufobot/privacy/ ; terms: https://blighted.world/ufobot/terms/ .
+
+- `/xp [user]`: level and XP; awards 15 XP for at most one non-bot message per user per minute, and does not read message content.
+- `/leaderboard`: top ten XP totals per server.
+- `/setbio bio:...`, `/server-profile [user]`: customizable public bio and server profile.
+- `/tempvoice [name] [limit]`: create a voice room; deletes when empty. Set `TEMPVOICE_CATEGORY_ID` if needed.
+- `/tempvoice-close`: close an empty room you own.
+- `/reset-profile`: delete XP and profile bio. Use `/unlink` separately for Riot ID / rank / agent role deletion.
+
+Enable Discord **Manage Channels** permissions for temporary rooms. XP requires GuildMessages intent only and does not inspect message text. To disable XP, set `XP_ENABLED=false`. If a server Hub manages secrets, inject them as process environment variables (prefer an encrypted secret store); do not store real secrets in your public repo, website JavaScript, Discord messages, or bot health responses. Hub health authentication is an API token independent of the Riot API key. The bot does not currently integrate directly with the Hub vault.
+
+The web pages are static policy and product documentation; they do not run an OAuth callback. The current /link command only associates a self-entered Riot ID, with an optional account-existence check—not ownership verification or official competitive rank synchronization. Public launch and Riot Sign On require Riot approval and updated consent/retention controls.
