@@ -51,7 +51,7 @@ const apiAccount=async(id,region)=>{
 async function ensureRole(guild,name){
  const existing=guild.roles.cache.find(r=>r.name===name);
  if(existing) return existing;
- return guild.roles.create({name,reason:'MossadBot Valorant self-service roles'});
+ return guild.roles.create({name,reason:'UFO Bot Valorant self-service roles'});
 }
 async function updateRankRole(member,record){
  const names=member.roles.cache.filter(r=>r.name==='Unverified Rank'||r.name==='Verified Rank'||tiers.some(t=>r.name===t||r.name.startsWith(t+' ')));
@@ -81,7 +81,7 @@ if(HUB_API_KEY){
   if(pathOnly!=='/health'){res.writeHead(404).end();return;}
   if(req.headers.authorization!=='Bearer '+HUB_API_KEY){res.writeHead(401).end();return;}
   res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
-  res.end(JSON.stringify({service:'MossadBot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:Object.values(data).filter(p=>!!p.riotId).length,rankProvider:'manual_only',autoRankSync:false}));
+  res.end(JSON.stringify({service:'UFO Bot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:Object.values(data).filter(p=>!!p.riotId).length,rankProvider:'manual_only',autoRankSync:false}));
  });
  server.listen(port,'127.0.0.1',()=>console.log('Hub health bound to 127.0.0.1:'+port));
 }
@@ -91,7 +91,7 @@ function panelRows(){
  );
 }
 registerCommunity(client);
-client.once('ready',()=>console.log('MossadBot online: '+client.user.tag));
+client.once('ready',()=>console.log('UFO Bot online: '+client.user.tag));
 client.on('interactionCreate',async(i)=>{
  if(!i.inGuild()) return;
  try {
