@@ -7,7 +7,7 @@ import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Permissio
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
 if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) throw Error('Set DISCORD_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID in .env');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const root = path.resolve('data'); fs.mkdirSync(root, { recursive: true });
+const root = path.resolve(process.env.BLIGHTED_BOT_DATA_DIR || 'data'); fs.mkdirSync(root, { recursive: true });
 const dbFile = path.join(root, 'members.json');
 let data = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : {};
 const save = () => { const tmp=dbFile+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(data,null,2)); fs.renameSync(tmp,dbFile); };
