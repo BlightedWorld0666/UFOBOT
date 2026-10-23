@@ -50,3 +50,17 @@ The bot is now named **UFO Bot**, source: https://github.com/BlightedWorld0666/U
 Enable Discord **Manage Channels** permissions for temporary rooms. XP requires GuildMessages intent only and does not inspect message text. To disable XP, set `XP_ENABLED=false`. If a server Hub manages secrets, inject them as process environment variables (prefer an encrypted secret store); do not store real secrets in your public repo, website JavaScript, Discord messages, or bot health responses. Hub health authentication is an API token independent of the Riot API key. The bot does not currently integrate directly with the Hub vault.
 
 The web pages are static policy and product documentation; they do not run an OAuth callback. The current /link command only associates a self-entered Riot ID, with an optional account-existence check—not ownership verification or official competitive rank synchronization. Public launch and Riot Sign On require Riot approval and updated consent/retention controls.
+
+
+## UFO Bot admin control center
+A private, authenticated dashboard is included in `dashboard/` with its own local server, encrypted credential storage, server settings, and a Hub integration placeholder.
+
+1. Run `npm install`.
+2. Run `npm run admin:setup` locally. Enter username **Admin** (the default), then enter your chosen password when prompted. The requested password can be entered during setup, but **it must never be saved to GitHub**. The helper generates an scrypt password hash and a random encryption key.
+3. Copy the generated `DASHBOARD_PASSWORD_HASH` and `DASHBOARD_MASTER_KEY` values to your private `.env`. Retain a secure backup of the master key: it cannot be recovered if lost.
+4. Run `npm run dashboard`. Open `http://127.0.0.1:8792/` on your Windows host. This is a separate process from `npm start`, so your Hub should start and supervise both.
+5. Do **not** expose port 8792 directly to the public internet. For remote access use a hardened authenticated HTTPS reverse proxy or private VPN and set `DASHBOARD_SECURE_COOKIE=true` behind HTTPS.
+
+Security: 8-hour HTTP-only SameSite Strict sessions, login throttling, server-side scrypt password verification, AES-256-GCM secret encryption, restricted secret names and no secret read-back. The default dashboard binds to localhost only. Configure a much stronger, unique password before any Internet-facing deployment; a short numeric password is unsafe for a public admin portal even when hashed.
+
+**Current implementation boundary:** Dashboard settings and encrypted secrets are saved separately in `data/dashboard.json`. They are not yet consumed dynamically by the Discord bot runtime or transmitted to the Hub. The Hub status and rank automation are explicitly labeled as unconnected. Integrating with the actual Hub vault and the Discord runtime requires the corresponding Hub API/authentication contract and a controlled restart/secret injection mechanism; never expose decryption keys to browser JavaScript.
