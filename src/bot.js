@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 
-const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY } = process.env;
+const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
 if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) throw Error('Set DISCORD_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID in .env');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const root = path.resolve('data'); fs.mkdirSync(root, { recursive: true });
@@ -23,6 +24,7 @@ const agents = {
 const allAgents=Object.values(agents).flat();
 const rankValues=tiers.flatMap(t=>t==='Radiant'?[t]:[1,2,3].map(n=>t+' '+n));
 const rankChoices=rankValues.map(n=>({name:n,value:n}));
+const lfgModes=['Competitive','Unrated','Swiftplay','Premier','Deathmatch'];
 const commands=[
  new SlashCommandBuilder().setName('setup-agents').setDescription('Post persistent agent selection menus').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('link').setDescription('Attach a Riot ID to your Discord profile (not ownership verification)').addStringOption(o=>o.setName('riot_id').setDescription('YourName#TAG').setRequired(true)).addStringOption(o=>o.setName('region').setDescription('Account routing region').addChoices({name:'Americas',value:'americas'},{name:'Europe',value:'europe'},{name:'Asia',value:'asia'})),
@@ -30,6 +32,8 @@ const commands=[
  new SlashCommandBuilder().setName('profile').setDescription('Show your Valorant profile').addUserOption(o=>o.setName('user').setDescription('Member')),
  new SlashCommandBuilder().setName('claim-rank').setDescription('Claim your competitive rank (marked unverified)').addStringOption(o=>o.setName('rank').setDescription('Claimed rank').setRequired(true).addChoices(...rankChoices)),
  new SlashCommandBuilder().setName('sync').setDescription('Recheck linked Riot ID where an authorized lookup is available'),
+ new SlashCommandBuilder().setName('lfg').setDescription('Post a looking-for-group listing').addStringOption(o=>o.setName('mode').setDescription('Queue').setRequired(true).addChoices(...lfgModes.map(m=>({name:m,value:m})))).addIntegerOption(o=>o.setName('spots').setDescription('Open spots (1–4)').setRequired(true).setMinValue(1).setMaxValue(4)).addStringOption(o=>o.setName('notes').setDescription('Optional short message').setMaxLength(160)),
+ new SlashCommandBuilder().setName('lfg-close').setDescription('Close your latest looking-for-group listing'),
  new SlashCommandBuilder().setName('verify-rank').setDescription('Staff: mark a member rank verified after independently checking evidence').setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles).addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)).addStringOption(o=>o.setName('rank').setDescription('Verified rank').setRequired(true).addChoices(...rankChoices))
 ].map(c=>c.toJSON());
 
@@ -60,6 +64,25 @@ async function updateAgentRoles(member,names){
  const previous=member.roles.cache.filter(r=>allAgents.includes(r.name));
  for(const role of previous.values()) if(!names.includes(role.name)) await member.roles.remove(role).catch(()=>{});
  for(const name of names) if(!member.roles.cache.some(r=>r.name===name)) await member.roles.add(await ensureRole(member.guild,name));
+}
+async function announceRank(guild,userId,oldRank,newRank,reason){
+ if(!RANK_LOG_CHANNEL_ID || oldRank===newRank) return;
+ const ch=await guild.channels.fetch(RANK_LOG_CHANNEL_ID).catch(()=>null);
+ if(!ch?.isTextBased()) return;
+ await ch.send({content:'Rank update · <@'+userId+'> · '+(oldRank||'Unknown')+' → '+newRank+' ('+reason+')',allowedMentions:{parse:[]}}).catch(()=>{});
+}
+const activeLfg=new Map();
+const bootedAt=Date.now();
+if(HUB_API_KEY){
+ const port=Number(process.env.HUB_PORT||8791);
+ const server=http.createServer((req,res)=>{
+  const pathOnly=(req.url||'').split('?')[0];
+  if(pathOnly!=='/health'){res.writeHead(404).end();return;}
+  if(req.headers.authorization!=='Bearer '+HUB_API_KEY){res.writeHead(401).end();return;}
+  res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
+  res.end(JSON.stringify({service:'MossadBot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:Object.values(data).filter(p=>!!p.riotId).length,rankProvider:'manual_only',autoRankSync:false}));
+ });
+ server.listen(port,'127.0.0.1',()=>console.log('Hub health bound to 127.0.0.1:'+port));
 }
 function panelRows(){
  return Object.entries(agents).map(([group,list])=>
@@ -96,6 +119,21 @@ client.on('interactionCreate',async(i)=>{
    await updateRankRole(await i.guild.members.fetch(uid),{rank:null});
    return i.editReply('Linked '+linked+'. '+(lookup.status==='found'?'Riot ID was found, but **account ownership is NOT verified**.':'ID saved without lookup; **ownership is NOT verified**.')+' Use /claim-rank to set an unverified rank. /unlink removes your association.');
   }
+  if(cmd==='lfg'){
+   const mode=i.options.getString('mode'),spots=i.options.getInteger('spots'),notes=i.options.getString('notes')||'Ready to queue';
+   const channel=LFG_CHANNEL_ID?await i.guild.channels.fetch(LFG_CHANNEL_ID).catch(()=>null):i.channel;
+   if(!channel?.isTextBased()) return i.reply({content:'LFG channel unavailable.',flags:MessageFlags.Ephemeral});
+   const previous=activeLfg.get(key(i.guildId,uid));if(previous){const old=await channel.messages.fetch(previous).catch(()=>null);if(old)await old.delete().catch(()=>{});}
+   const p=get(i.guildId,uid),message=await channel.send({embeds:[new EmbedBuilder().setTitle('Looking for '+spots+' · '+mode).setDescription(notes).addFields({name:'Host',value:'<@'+uid+'>',inline:true},{name:'Rank',value:p.rank?(p.rank+(p.verified?' · Staff checked':' · Unverified')):'Not set',inline:true},{name:'Region',value:p.region||'Not set',inline:true},{name:'Agents',value:(p.agents||[]).join(', ')||'Not set'}).setColor(0xff4655)],allowedMentions:{parse:[]}});
+   activeLfg.set(key(i.guildId,uid),message.id);
+   return i.reply({content:'LFG posted in <#'+channel.id+'>. Use /lfg-close when finished.',flags:MessageFlags.Ephemeral});
+  }
+  if(cmd==='lfg-close'){
+   const messageId=activeLfg.get(key(i.guildId,uid));if(!messageId)return i.reply({content:'No active listing from this bot session.',flags:MessageFlags.Ephemeral});
+   const channel=LFG_CHANNEL_ID?await i.guild.channels.fetch(LFG_CHANNEL_ID).catch(()=>null):i.channel;
+   const msg=await channel?.messages?.fetch(messageId).catch(()=>null);if(msg)await msg.delete().catch(()=>{});
+   activeLfg.delete(key(i.guildId,uid));return i.reply({content:'Listing closed.',flags:MessageFlags.Ephemeral});
+  }
   if(cmd==='unlink'){
    delete data[key(i.guildId,uid)];save();
    const member=await i.guild.members.fetch(uid);await updateRankRole(member,{rank:null});await updateAgentRoles(member,[]);
@@ -112,6 +150,7 @@ client.on('interactionCreate',async(i)=>{
    if(!record.riotId) return i.reply({content:'That member has not linked an ID.',flags:MessageFlags.Ephemeral});
    const rank=i.options.getString('rank');put(i.guildId,user.id,{rank,verified:true,verifiedBy:uid});
    await updateRankRole(await i.guild.members.fetch(user.id),{rank,verified:true});
+   await announceRank(i.guild,user.id,record.rank,rank,'staff checked');
    return i.reply({content:'Staff verification recorded for '+user.username+': '+rank+'.',flags:MessageFlags.Ephemeral});
   }
   if(cmd==='sync'){
