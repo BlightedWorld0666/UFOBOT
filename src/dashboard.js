@@ -35,7 +35,7 @@ http.createServer(async(req,res)=>{
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Content-Security-Policy',"default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'");
   res.setHeader('Referrer-Policy','no-referrer');
-  if(req.method==='POST'&&!originAllowed(req))return json(res,403,{error:'Invalid origin'});
+  if(['POST','PUT','DELETE','PATCH'].includes(req.method)&&!originAllowed(req))return json(res,403,{error:'Invalid origin'});
   if(route==='/api/login'&&req.method==='POST'){
    const addr=req.socket.remoteAddress||'unknown',status=failures.get(addr)||{count:0,until:0};
    if(status.until>Date.now())return json(res,429,{error:'Too many attempts, retry later'});
@@ -48,7 +48,7 @@ http.createServer(async(req,res)=>{
    res.setHeader('Set-Cookie','ufo_session='+id+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'+(SECURE?'; Secure':''));
    return json(res,200,{ok:true,username:USER});
   }
-  if(route==='/app.js' && req.method==='GET'){const bytes=fs.readFileSync(path.join(publicDir,'app.js'));res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store'});return res.end(bytes);}
+  if((route==='/app.js'||route==='/styles.css') && req.method==='GET'){const name=route==='/app.js'?'app.js':'styles.css';const bytes=fs.readFileSync(path.join(publicDir,name));res.writeHead(200,{'Content-Type':name.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8','Cache-Control':'no-store'});return res.end(bytes);}
   if(route==='/api/me')return json(res,200,{authenticated:authenticated(req),username:authenticated(req)?USER:null});
   if(!authenticated(req)){
    if(route.startsWith('/api/'))return json(res,401,{error:'Login required'});
@@ -62,6 +62,20 @@ http.createServer(async(req,res)=>{
   if(route==='/api/secrets'&&req.method==='GET')return json(res,200,{secrets:allowedSecrets.map(name=>({name,configured:!!db.secrets[name]}))});
   if(route==='/api/secrets'&&req.method==='PUT'){const b=await body(req);if(!allowedSecrets.includes(b.name)||typeof b.value!=='string'||b.value.length<1||b.value.length>2000)return json(res,400,{error:'Invalid secret'});db.secrets[b.name]=encrypt(b.value);save();return json(res,200,{ok:true,note:'Encrypted and stored. Bot/Hub must explicitly load secrets at startup; they are not yet passed to the running bot.'});}
   if(route==='/api/secrets'&&req.method==='DELETE'){const b=await body(req);if(!allowedSecrets.includes(b.name))return json(res,400,{error:'Invalid key'});delete db.secrets[b.name];save();return json(res,200,{ok:true});}
+  if(route==='/api/bot-health'&&req.method==='GET'){
+   let token=process.env.HUB_API_KEY||'';
+   const encrypted=db.secrets.HUB_API_KEY;
+   if(encrypted){try{const raw=Buffer.from(encrypted,'base64');const d=crypto.createDecipheriv('aes-256-gcm',key,raw.subarray(0,12));d.setAuthTag(raw.subarray(12,28));token=Buffer.concat([d.update(raw.subarray(28)),d.final()]).toString('utf8');}catch{return json(res,200,{status:'not_configured',message:'Saved Hub key could not be decrypted. Check your dashboard master key.'});}}
+   if(!token)return json(res,200,{status:'not_configured',message:'Set HUB_API_KEY on the bot and in the dashboard vault to enable authenticated local health.'});
+   const port=Number(process.env.HUB_PORT||8791);
+   if(!Number.isInteger(port)||port<1||port>65535)return json(res,200,{status:'unreachable',message:'Invalid local health port configuration.'});
+   try{
+    const response=await fetch('http://127.0.0.1:'+port+'/health',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(2500)});
+    if(!response.ok)return json(res,200,{status:'unreachable',message:'Bot health endpoint returned HTTP '+response.status+'. Check matching Hub API keys.'});
+    const report=await response.json();
+    return json(res,200,{status:report.status==='online'?'online':'starting',message:report.status==='online'?'Discord runtime responding':'Bot runtime initializing',guilds:Number.isInteger(report.guilds)?report.guilds:null,linkedProfiles:Number.isInteger(report.linkedProfiles)?report.linkedProfiles:null,uptimeSeconds:Number.isInteger(report.uptimeSeconds)?report.uptimeSeconds:null});
+   }catch{return json(res,200,{status:'unreachable',message:'No response from local bot health endpoint at 127.0.0.1:'+port});}
+  }
   if(route==='/api/overview'&&req.method==='GET')return json(res,200,{service:'UFO Bot',dashboard:'online',hub:db.settings.hubUrl?'Configured':'Not configured',rankSync:'Not available via official general rank endpoint',secrets:Object.keys(db.secrets).length});
   if(route==='/api/hub-check'&&req.method==='POST')return json(res,200,{status:'unconnected',message:'Hub URL can be saved in Settings. A secure mutually authenticated Hub integration must be configured on the Hub side before remote control is enabled.'});
   return json(res,404,{error:'Not found'});
