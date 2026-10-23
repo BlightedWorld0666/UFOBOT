@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { setting } from './runtime-settings.js';
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, MessageFlags } from 'discord.js';
 
-const folder=path.resolve('data');
+const folder=path.resolve(process.env.BLIGHTED_BOT_DATA_DIR||'data');
 fs.mkdirSync(folder,{recursive:true});
 const filepath=path.join(folder,'community.json');
 let records=fs.existsSync(filepath)?JSON.parse(fs.readFileSync(filepath,'utf8')):{users:{},rooms:{}};
@@ -24,13 +25,13 @@ const commands=[
 ].map(c=>c.toJSON());
 export function registerCommunity(client){
  client.on('messageCreate',message=>{
-  if(!message.guild || message.author.bot || message.webhookId || !process.env.XP_ENABLED || process.env.XP_ENABLED==='false')return;
+  if(!message.guild || message.author.bot || message.webhookId || !setting('xpEnabled',process.env.XP_ENABLED!=='false'))return;
   const k=profileKey(message.guildId,message.author.id);
   const now=Date.now();
-  if(now-(cooldown.get(k)||0)<60000)return;
+  if(now-(cooldown.get(k)||0)<setting('xpCooldownSeconds',60)*1000)return;
   cooldown.set(k,now);
   const user=records.users[k]??{xp:0,bio:''};
-  user.xp+=15;
+  user.xp+=setting('xpPerMessage',15);
   records.users[k]=user;persist();
  });
  client.on('voiceStateUpdate',async(oldState,newState)=>{
@@ -58,10 +59,10 @@ export function registerCommunity(client){
    const cmd=i.commandName;
    if(cmd==='tempvoice'){
     const name=i.options.getString('name')||i.user.username+"'s Room";
-    const limit=i.options.getInteger('limit')??5;
+    const limit=i.options.getInteger('limit')??Math.min(99,Math.max(1,setting('tempvoiceLimit',5)));
     const owned=Object.entries(records.rooms).find(([,v])=>v.guild===i.guildId&&v.owner===i.user.id);
     if(owned)return i.reply({content:'You already own a temporary room: <#'+owned[0]+'>',flags:MessageFlags.Ephemeral});
-    const categoryId=process.env.TEMPVOICE_CATEGORY_ID||null;
+    const categoryId=setting('tempvoiceCategory',process.env.TEMPVOICE_CATEGORY_ID||'')||null;
     let parent=null;
     if(categoryId){
      const category=await i.guild.channels.fetch(categoryId).catch(()=>null);
