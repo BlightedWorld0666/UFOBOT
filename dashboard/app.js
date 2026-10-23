@@ -88,7 +88,7 @@ $('#loginForm').addEventListener('submit',async event=>{
  }catch(e){toast('#loginNote',e.message,true);if(ready)showLogin()}
  finally{button.disabled=false}
 });
-$('#logout').addEventListener('click',async()=>{
+for(const logoutButton of [$('#logout'),$('#logoutTop')])logoutButton.addEventListener('click',async()=>{
  try{await api('logout','POST')}finally{showLogin();$('#password').value='';go('overview')}
 });
 all('.nav button[data-tab]').forEach(button=>button.addEventListener('click',()=>go(button.dataset.tab)));
