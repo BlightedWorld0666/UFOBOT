@@ -2,11 +2,12 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { registerCommunity, communityCommands } from './community.js';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
 if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) throw Error('Set DISCORD_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID in .env');
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildVoiceStates] });
 const root = path.resolve(process.env.BLIGHTED_BOT_DATA_DIR || 'data'); fs.mkdirSync(root, { recursive: true });
 const dbFile = path.join(root, 'members.json');
 let data = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : {};
@@ -35,7 +36,7 @@ const commands=[
  new SlashCommandBuilder().setName('lfg').setDescription('Post a looking-for-group listing').addStringOption(o=>o.setName('mode').setDescription('Queue').setRequired(true).addChoices(...lfgModes.map(m=>({name:m,value:m})))).addIntegerOption(o=>o.setName('spots').setDescription('Open spots (1–4)').setRequired(true).setMinValue(1).setMaxValue(4)).addStringOption(o=>o.setName('notes').setDescription('Optional short message').setMaxLength(160)),
  new SlashCommandBuilder().setName('lfg-close').setDescription('Close your latest looking-for-group listing'),
  new SlashCommandBuilder().setName('verify-rank').setDescription('Staff: mark a member rank verified after independently checking evidence').setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles).addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)).addStringOption(o=>o.setName('rank').setDescription('Verified rank').setRequired(true).addChoices(...rankChoices))
-].map(c=>c.toJSON());
+].map(c=>c.toJSON()).concat(communityCommands);
 
 const apiAccount=async(id,region)=>{
  if(!RIOT_API_KEY) return {status:'unavailable'};
@@ -89,6 +90,7 @@ function panelRows(){
   new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agent:'+group).setPlaceholder(group+' — select your mains (or clear)').setMinValues(0).setMaxValues(list.length).addOptions(list.map(a=>({label:a,value:a}))))
  );
 }
+registerCommunity(client);
 client.once('ready',()=>console.log('MossadBot online: '+client.user.tag));
 client.on('interactionCreate',async(i)=>{
  if(!i.inGuild()) return;
