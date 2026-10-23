@@ -27,3 +27,12 @@ Entering a Riot ID or appearing on Discord's Tracker activity is **not proof of 
 `/verify-rank` is a **staff attestation**. For stricter labeling, rename that role to `Staff Checked Rank`, not `Riot Verified`.
 
 Data is stored in `data/members.json` and removed on `/unlink`. For a larger public bot, replace this file with a transactional database and add retention/security controls. The code is a starter and must be tested in a Discord test server before production.
+
+## Added community tools
+- `/lfg mode:Competitive spots:2 notes:...` posts a listing. Specify `LFG_CHANNEL_ID` to send all listings to a dedicated channel.
+- `/lfg-close` removes your active listing. Listings are tracked in memory, so the active-listing index resets on bot restart.
+- A staff-confirmed rank change sends a notification to `RANK_LOG_CHANNEL_ID` when configured. Rank claims are **not** announced as verified.
+- A local, read-only hub health endpoint listens on `127.0.0.1:HUB_PORT/health` when `HUB_API_KEY` is set. Send `Authorization: Bearer <HUB_API_KEY>` to get status, uptime, Discord server count, linked-profile count and rank-provider capability. It does not expose Riot IDs. Do not expose this endpoint to the public internet.
+
+## Riot rank reality
+Existing Discord↔Riot connected accounts aren't generally readable as Riot authentication credentials by third-party Discord bots. The official Valorant API documents player match histories after authorized opt-in and top ladder leaderboards, **not a general current competitive-rank endpoint**. `/sync` only rechecks the account identifier; it never fabricates a rank. Planned verified OAuth login requires Riot production RSO approval. Rank notifications are manually staff-triggered until an authorized rank provider exists.
