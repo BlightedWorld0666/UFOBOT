@@ -33,7 +33,7 @@ http.createServer(async(req,res)=>{
  try{
   const url=new URL(req.url,'http://localhost'),route=url.pathname;
   res.setHeader('X-Frame-Options','DENY');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy',"default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'");
   res.setHeader('Referrer-Policy','no-referrer');
   if(req.method==='POST'&&!originAllowed(req))return json(res,403,{error:'Invalid origin'});
   if(route==='/api/login'&&req.method==='POST'){
@@ -48,6 +48,7 @@ http.createServer(async(req,res)=>{
    res.setHeader('Set-Cookie','ufo_session='+id+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'+(SECURE?'; Secure':''));
    return json(res,200,{ok:true,username:USER});
   }
+  if(route==='/app.js' && req.method==='GET'){const bytes=fs.readFileSync(path.join(publicDir,'app.js'));res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store'});return res.end(bytes);}
   if(route==='/api/me')return json(res,200,{authenticated:authenticated(req),username:authenticated(req)?USER:null});
   if(!authenticated(req)){
    if(route.startsWith('/api/'))return json(res,401,{error:'Login required'});
