@@ -1,4 +1,4 @@
-# MossadBot — Valorant Discord community bot
+# UFO Bot — Discord community assistant
 
 A custom, self-hosted Discord bot for agent roles, Riot ID associations, manually claimed rank roles, profiles and explicit unlinking.
 
@@ -63,4 +63,18 @@ A private, authenticated dashboard is included in `dashboard/` with its own loca
 
 Security: 8-hour HTTP-only SameSite Strict sessions, login throttling, server-side scrypt password verification, AES-256-GCM secret encryption, restricted secret names and no secret read-back. The default dashboard binds to localhost only. Configure a much stronger, unique password before any Internet-facing deployment; a short numeric password is unsafe for a public admin portal even when hashed.
 
-**Current implementation boundary:** Dashboard settings and encrypted secrets are saved separately in `data/dashboard.json`. They are not yet consumed dynamically by the Discord bot runtime or transmitted to the Hub. The Hub status and rank automation are explicitly labeled as unconnected. Integrating with the actual Hub vault and the Discord runtime requires the corresponding Hub API/authentication contract and a controlled restart/secret injection mechanism; never expose decryption keys to browser JavaScript.
+**Current implementation boundary:** Dashboard settings and encrypted secrets are saved in `data/dashboard.json`. Supported community settings are read by the bot from the same file: XP enable/rate/cooldown, temporary voice category and default user limit, LFG channel/enable, agent selection toggle, rank claim toggle, and rank-log channel. The Discord bot and dashboard must share the same working directory (or set matching `BLIGHTED_BOT_DATA_DIR`). Credential entries remain encrypted and are **not** automatically injected into the running bot. Restart and environment changes are managed separately. Hub control and automatic verified VALORANT rank sync are not connected.
+
+## Blighted.World admin portal integration (October 2026)
+
+The owner-facing dashboard matches the visual design of the UFO Bot public page. The public landing page at `https://blighted.world/ufobot/` and the Blighted.World portfolio now link to `https://admin.blighted.world/`. **The link alone does not deploy the admin server or configure DNS.** This is a private backend app: do not upload `dashboard/index.html` as a publicly accessible static login page.
+
+1. On the **Windows host**, open the UFOBOT repository folder, install Node.js 20+ if needed, and run `npm install`.
+2. Run `npm run admin:setup`. Enter **Admin** for the username and enter your chosen password when prompted. For the requested initial local-only setup, enter the password you provided in chat. The script computes a salted scrypt hash and fresh AES encryption master key. **Neither the password nor the resulting .env values should be committed to GitHub.**
+3. Copy `.env.example` to a local `.env`, add the generated `DASHBOARD_PASSWORD_HASH` and `DASHBOARD_MASTER_KEY`, and set `DASHBOARD_USERNAME=Admin`. Retain existing Discord and Hub environment variables. Save a secure backup of the master key.
+4. Run `npm run dashboard` alongside `npm start` (or let your Server Hub supervise both processes). The dashboard listens at `http://127.0.0.1:8792/` by default. It can be used locally without a public URL.
+5. To make the linked admin hostname work, configure your existing **Cloudflare Tunnel** with a public hostname `admin.blighted.world` forwarding **HTTPS-terminated** traffic to `http://127.0.0.1:8792`. Set `DASHBOARD_SECURE_COOKIE=true` in the host's private `.env` and restart the dashboard.
+6. **Before allowing access over the Internet**, protect `admin.blighted.world` with a Cloudflare Access policy permitting only your own verified identity, and switch from the six-digit initial password to a long unique password. Access policies should be the outer gate; the dashboard's own hashed-password login is the inner gate.
+7. For real bot status, set a matching `HUB_API_KEY` in the bot's runtime environment and dashboard vault; the health check requests only `127.0.0.1:HUB_PORT/health` and does not proxy arbitrary stored URLs. The Hub endpoint field is configuration-only until an authenticated Hub API is implemented.
+
+The public UFO Bot page should be safe to visit without authentication. The admin hostname must be HTTPS and protected before it is publicly deployed. The dashboard uses HTTP-only, SameSite Strict sessions, origin checks for state-changing requests, login lockout, CSP, a server-side encrypted vault, and a private bind address. **Do not expose port 8792 directly or commit short-password hashes into the public UFOBOT repository.**
