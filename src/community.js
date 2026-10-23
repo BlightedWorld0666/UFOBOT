@@ -17,6 +17,7 @@ const commands=[
  new SlashCommandBuilder().setName('xp').setDescription('View your server XP and level').addUserOption(o=>o.setName('user').setDescription('Member to inspect')),
  new SlashCommandBuilder().setName('leaderboard').setDescription('Show the top server XP earners'),
  new SlashCommandBuilder().setName('server-profile').setDescription('View a custom server profile').addUserOption(o=>o.setName('user').setDescription('Member')),
+ new SlashCommandBuilder().setName('reset-profile').setDescription('Delete your XP and server profile biography'),
  new SlashCommandBuilder().setName('setbio').setDescription('Update your public server bio').addStringOption(o=>o.setName('bio').setDescription('Up to 160 characters').setRequired(true).setMaxLength(160)),
  new SlashCommandBuilder().setName('tempvoice').setDescription('Create a temporary voice room').addStringOption(o=>o.setName('name').setDescription('Channel name').setMaxLength(40)).addIntegerOption(o=>o.setName('limit').setDescription('User limit (0–20)').setMinValue(0).setMaxValue(20)),
  new SlashCommandBuilder().setName('tempvoice-close').setDescription('Close your empty temporary voice room')
@@ -78,6 +79,10 @@ export function registerCommunity(client){
     if(ch?.members.size)return i.reply({content:'The room must be empty before closing.',flags:MessageFlags.Ephemeral});
     await ch?.delete('Room owner closed it');delete records.rooms[owned[0]];persist();
     return i.reply({content:'Your temporary room was closed.',flags:MessageFlags.Ephemeral});
+   }
+   if(cmd==='reset-profile'){
+    delete records.users[profileKey(i.guildId,i.user.id)];persist();
+    return i.reply({content:'Your XP and custom profile biography have been deleted. Use /unlink separately to remove your Riot ID and role selections.',flags:MessageFlags.Ephemeral});
    }
    if(cmd==='setbio'){
     const k=profileKey(i.guildId,i.user.id);
