@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { registerCommunity, communityCommands } from './community.js';
+import { setting } from './runtime-settings.js';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
@@ -67,8 +68,9 @@ async function updateAgentRoles(member,names){
  for(const name of names) if(!member.roles.cache.some(r=>r.name===name)) await member.roles.add(await ensureRole(member.guild,name));
 }
 async function announceRank(guild,userId,oldRank,newRank,reason){
- if(!RANK_LOG_CHANNEL_ID || oldRank===newRank) return;
- const ch=await guild.channels.fetch(RANK_LOG_CHANNEL_ID).catch(()=>null);
+ const channelId=setting('logChannel',RANK_LOG_CHANNEL_ID||'');
+ if(!channelId || oldRank===newRank) return;
+ const ch=await guild.channels.fetch(channelId).catch(()=>null);
  if(!ch?.isTextBased()) return;
  await ch.send({content:'Rank update · <@'+userId+'> · '+(oldRank||'Unknown')+' → '+newRank+' ('+reason+')',allowedMentions:{parse:[]}}).catch(()=>{});
 }
@@ -96,6 +98,7 @@ client.on('interactionCreate',async(i)=>{
  if(!i.inGuild()) return;
  try {
   if(i.isStringSelectMenu()&&i.customId.startsWith('agent:')){
+   if(!setting('agentRoles',true))return i.reply({content:'Agent selections are disabled by this server.',flags:MessageFlags.Ephemeral});
    const group=i.customId.slice(6),allowed=agents[group]; if(!allowed) return;
    const entry=get(i.guildId,i.user.id),selected=(entry.agents||[]).filter(a=>!allowed.includes(a)).concat(i.values.filter(a=>allowed.includes(a)));
    await i.deferReply({flags:MessageFlags.Ephemeral});
@@ -106,6 +109,7 @@ client.on('interactionCreate',async(i)=>{
   if(!i.isChatInputCommand()) return;
   const cmd=i.commandName, uid=i.user.id, entry=get(i.guildId,uid);
   if(cmd==='setup-agents'){
+   if(!setting('agentRoles',true))return i.reply({content:'Agent selections are disabled in the dashboard.',flags:MessageFlags.Ephemeral});
    await i.channel.send({embeds:[new EmbedBuilder().setTitle('Choose your VALORANT agents').setDescription('Pick multiple agent mains in each class. Re-select to update; clear a class to remove those roles.').setColor(0xff4655)],components:panelRows()});
    return i.reply({content:'Agent selection panel posted.',flags:MessageFlags.Ephemeral});
   }
@@ -122,8 +126,10 @@ client.on('interactionCreate',async(i)=>{
    return i.editReply('Linked '+linked+'. '+(lookup.status==='found'?'Riot ID was found, but **account ownership is NOT verified**.':'ID saved without lookup; **ownership is NOT verified**.')+' Use /claim-rank to set an unverified rank. /unlink removes your association.');
   }
   if(cmd==='lfg'){
+   if(!setting('lfgEnabled',true))return i.reply({content:'Looking-for-group is disabled in the dashboard.',flags:MessageFlags.Ephemeral});
    const mode=i.options.getString('mode'),spots=i.options.getInteger('spots'),notes=i.options.getString('notes')||'Ready to queue';
-   const channel=LFG_CHANNEL_ID?await i.guild.channels.fetch(LFG_CHANNEL_ID).catch(()=>null):i.channel;
+   const targetChannel=setting('lfgChannel',LFG_CHANNEL_ID||'');
+   const channel=targetChannel?await i.guild.channels.fetch(targetChannel).catch(()=>null):i.channel;
    if(!channel?.isTextBased()) return i.reply({content:'LFG channel unavailable.',flags:MessageFlags.Ephemeral});
    const previous=activeLfg.get(key(i.guildId,uid));if(previous){const old=await channel.messages.fetch(previous).catch(()=>null);if(old)await old.delete().catch(()=>{});}
    const p=get(i.guildId,uid),message=await channel.send({embeds:[new EmbedBuilder().setTitle('Looking for '+spots+' · '+mode).setDescription(notes).addFields({name:'Host',value:'<@'+uid+'>',inline:true},{name:'Rank',value:p.rank?(p.rank+(p.verified?' · Staff checked':' · Unverified')):'Not set',inline:true},{name:'Region',value:p.region||'Not set',inline:true},{name:'Agents',value:(p.agents||[]).join(', ')||'Not set'}).setColor(0xff4655)],allowedMentions:{parse:[]}});
@@ -132,7 +138,8 @@ client.on('interactionCreate',async(i)=>{
   }
   if(cmd==='lfg-close'){
    const messageId=activeLfg.get(key(i.guildId,uid));if(!messageId)return i.reply({content:'No active listing from this bot session.',flags:MessageFlags.Ephemeral});
-   const channel=LFG_CHANNEL_ID?await i.guild.channels.fetch(LFG_CHANNEL_ID).catch(()=>null):i.channel;
+   const targetChannel=setting('lfgChannel',LFG_CHANNEL_ID||'');
+   const channel=targetChannel?await i.guild.channels.fetch(targetChannel).catch(()=>null):i.channel;
    const msg=await channel?.messages?.fetch(messageId).catch(()=>null);if(msg)await msg.delete().catch(()=>{});
    activeLfg.delete(key(i.guildId,uid));return i.reply({content:'Listing closed.',flags:MessageFlags.Ephemeral});
   }
@@ -142,6 +149,7 @@ client.on('interactionCreate',async(i)=>{
    return i.reply({content:'Riot ID, rank claims and agent selections removed.',flags:MessageFlags.Ephemeral});
   }
   if(cmd==='claim-rank'){
+   if(!setting('rankClaims',true))return i.reply({content:'Rank claims are disabled in the dashboard.',flags:MessageFlags.Ephemeral});
    if(!entry.riotId) return i.reply({content:'First use /link.',flags:MessageFlags.Ephemeral});
    const rank=i.options.getString('rank');put(i.guildId,uid,{rank,verified:false});
    await updateRankRole(await i.guild.members.fetch(uid),{rank,verified:false});
