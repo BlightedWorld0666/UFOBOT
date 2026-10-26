@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveBotDataDir } from './data-dir.js';
 
 // Shared local settings written by the authenticated dashboard server.
 // Reloads when the file changes, so community controls can apply without restart.
-const filename=path.resolve(process.env.BLIGHTED_BOT_DATA_DIR||'data','dashboard.json');
+const filename=path.join(resolveBotDataDir(),'dashboard.json');
 let stamp=-1;
 let values={};
 export function setting(name,fallback){
