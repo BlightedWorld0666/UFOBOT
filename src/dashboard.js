@@ -2,6 +2,8 @@ import 'dotenv/config';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveBotDataDir } from './data-dir.js';
 import crypto from 'node:crypto';
 
 const HOST=process.env.DASHBOARD_HOST||'127.0.0.1';
@@ -13,7 +15,7 @@ const SECURE=process.env.DASHBOARD_SECURE_COOKIE==='true';
 if(!HASH||!MASTER){console.error('Set DASHBOARD_PASSWORD_HASH and DASHBOARD_MASTER_KEY before starting the admin dashboard. See README.');process.exit(1);}
 const key=Buffer.from(MASTER,'base64');
 if(key.length!==32)throw Error('DASHBOARD_MASTER_KEY must be 32 random bytes in base64');
-const dataDir=path.resolve('data');fs.mkdirSync(dataDir,{recursive:true});
+const dataDir=resolveBotDataDir();fs.mkdirSync(dataDir,{recursive:true});
 const configFile=path.join(dataDir,'dashboard.json');
 const defaults={guildName:'UFO Bot',xpEnabled:true,xpPerMessage:15,xpCooldownSeconds:60,tempvoiceLimit:5,lfgEnabled:true,agentRoles:true,rankClaims:true,logChannel:'',lfgChannel:'',tempvoiceCategory:'',hubUrl:'',hubStatus:'Not configured'};
 const load=()=>fs.existsSync(configFile)?JSON.parse(fs.readFileSync(configFile,'utf8')):{settings:{...defaults},secrets:{}};
@@ -21,7 +23,7 @@ let db=load();db.settings={...defaults,...db.settings};
 const save=()=>{const t=configFile+'.tmp';fs.writeFileSync(t,JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(t,configFile)};
 const encrypt=value=>{const iv=crypto.randomBytes(12);const c=crypto.createCipheriv('aes-256-gcm',key,iv);const ciphertext=Buffer.concat([c.update(value,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),ciphertext]).toString('base64');};
 const sessions=new Map(),failures=new Map();
-const publicDir=path.resolve('dashboard');
+const publicDir=fileURLToPath(new URL('../dashboard/',import.meta.url));
 function readCookie(s){const match=/(?:^|;\s*)ufo_session=([^;]+)/.exec(s||'');return match?match[1]:null;}
 function authenticated(req){const id=readCookie(req.headers.cookie);if(!id)return false;const v=sessions.get(id);if(!v)return false;if(v.expires<Date.now()){sessions.delete(id);return false;}return true;}
 function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));}
@@ -57,7 +59,7 @@ http.createServer(async(req,res)=>{
   }
   if(route==='/api/logout'&&req.method==='POST'){sessions.delete(readCookie(req.headers.cookie));res.setHeader('Set-Cookie','ufo_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+(SECURE?'; Secure':''));return json(res,200,{ok:true});}
   if(route==='/api/settings'&&req.method==='GET')return json(res,200,{settings:db.settings});
-  if(route==='/api/settings'&&req.method==='PUT'){db.settings={...db.settings,...safeSetting(await body(req))};save();return json(res,200,{settings:db.settings,note:'Saved to dashboard configuration; bot runtime application requires integration/restart'});}
+  if(route==='/api/settings'&&req.method==='PUT'){db.settings={...db.settings,...safeSetting(await body(req))};save();return json(res,200,{settings:db.settings,note:'Saved to the shared configuration file. Supported bot settings are read on the next relevant event when both processes use this data directory; live connectivity is not verified.'});}
   const allowedSecrets=['DISCORD_TOKEN','RIOT_API_KEY','HUB_API_KEY','DISCORD_CLIENT_ID','DISCORD_GUILD_ID'];
   if(route==='/api/secrets'&&req.method==='GET')return json(res,200,{secrets:allowedSecrets.map(name=>({name,configured:!!db.secrets[name]}))});
   if(route==='/api/secrets'&&req.method==='PUT'){const b=await body(req);if(!allowedSecrets.includes(b.name)||typeof b.value!=='string'||b.value.length<1||b.value.length>2000)return json(res,400,{error:'Invalid secret'});db.secrets[b.name]=encrypt(b.value);save();return json(res,200,{ok:true,note:'Encrypted and stored. Bot/Hub must explicitly load secrets at startup; they are not yet passed to the running bot.'});}
