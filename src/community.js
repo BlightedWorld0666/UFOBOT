@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveBotDataDir } from './data-dir.js';
 import { setting } from './runtime-settings.js';
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, MessageFlags } from 'discord.js';
 
-const folder=path.resolve(process.env.BLIGHTED_BOT_DATA_DIR||'data');
+const folder=resolveBotDataDir();
 fs.mkdirSync(folder,{recursive:true});
 const filepath=path.join(folder,'community.json');
 let records=fs.existsSync(filepath)?JSON.parse(fs.readFileSync(filepath,'utf8')):{users:{},rooms:{}};
