@@ -104,7 +104,7 @@ all('.save-settings').forEach(button=>button.addEventListener('click',async()=>{
    settings[element.dataset.setting]=value;
   });
   const result=await api('settings','PUT',settings);
-  toast(status,'Preferences saved locally. Runtime integration may require a restart.');await loadOverview();
+  toast(status,'Settings saved to the dashboard data directory. Supported controls apply when the bot shares that directory; bot connectivity is not verified.');await loadOverview();
  }catch(e){toast(status,e.message,true)}finally{button.disabled=false}
 }));
 $('#secretForm').addEventListener('submit',async event=>{
