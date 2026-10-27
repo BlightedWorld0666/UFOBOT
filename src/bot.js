@@ -1,24 +1,19 @@
 import 'dotenv/config';
-import fs from 'node:fs';
-import path from 'node:path';
-import { resolveBotDataDir } from './data-dir.js';
+import { openStore } from './store.js';
 import http from 'node:http';
 import { registerCommunity, communityCommands } from './community.js';
 import { setting } from './runtime-settings.js';
 import { lookupRiotAccount } from './riot-account.js';
 import { guideFor, riotLookupExplanation, riotKeySummary } from './bot-guide.js';
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags, ButtonBuilder, ButtonStyle } from 'discord.js';
 
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
 if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) throw Error('Set DISCORD_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID in .env');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildVoiceStates] });
-const root = resolveBotDataDir(); fs.mkdirSync(root, { recursive: true });
-const dbFile = path.join(root, 'members.json');
-let data = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : {};
-const save = () => { const tmp=dbFile+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(data,null,2)); fs.renameSync(tmp,dbFile); };
-const key = (guild, user) => guild+':'+user;
-const get = (guild,user) => data[key(guild,user)] ?? {};
-const put = (guild,user,updates) => { data[key(guild,user)]={...get(guild,user),...updates};save(); };
+const store=openStore();
+if(store.legacyPending())throw Error('Legacy JSON bot data found. STOP: run npm run data:plan, then back up and explicitly migrate before running this build. No records were deleted.');
+const get=(guild,user)=>store.getProfile(guild,user);
+const put=(guild,user,patch)=>store.putProfile(guild,user,patch);
 const tiers=['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal','Radiant'];
 const agents = {
  Duelist:['Jett','Reyna','Raze','Phoenix','Yoru','Neon','Iso','Waylay'],
@@ -31,6 +26,9 @@ const rankValues=tiers.flatMap(t=>t==='Radiant'?[t]:[1,2,3].map(n=>t+' '+n));
 const rankChoices=rankValues.map(n=>({name:n,value:n}));
 const lfgModes=['Competitive','Unrated','Swiftplay','Premier','Deathmatch'];
 const commands=[
+ new SlashCommandBuilder().setName('erasedata').setDescription('Erase your UFO Bot profile and revoke stored data').addStringOption(o=>o.setName('scope').setDescription('All servers, or one category in this server').addChoices({name:'Everything across all servers',value:'all'},{name:'Riot ID and rank',value:'riot'},{name:'XP and passive collection',value:'xp'},{name:'Biography',value:'bio'},{name:'Agent selections',value:'agents'},{name:'Active LFG',value:'lfg'})),
+ new SlashCommandBuilder().setName('ping').setDescription('Check the Discord gateway response'),
+ new SlashCommandBuilder().setName('server-info').setDescription('Show this Discord server summary'),
  new SlashCommandBuilder().setName('help').setDescription('Explore UFO Bot commands and privacy boundaries').addStringOption(o=>o.setName('topic').setDescription('Help category').addChoices({name:'Overview',value:'overview'},{name:'Identity & rank',value:'identity'},{name:'LFG & voice',value:'squad'},{name:'XP & profiles',value:'progress'},{name:'Staff & safety',value:'staff'})),
  new SlashCommandBuilder().setName('bot-status').setDescription('See Discord, community settings, and Riot API readiness'),
  new SlashCommandBuilder().setName('setup-agents').setDescription('Post persistent agent selection menus').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
@@ -69,7 +67,6 @@ async function announceRank(guild,userId,oldRank,newRank,reason){
  if(!ch?.isTextBased()) return;
  await ch.send({content:'Rank update · <@'+userId+'> · '+(oldRank||'Unknown')+' → '+newRank+' ('+reason+')',allowedMentions:{parse:[]}}).catch(()=>{});
 }
-const activeLfg=new Map();
 const bootedAt=Date.now();
 if(HUB_API_KEY){
  const port=Number(process.env.HUB_PORT||8791);
@@ -78,7 +75,7 @@ if(HUB_API_KEY){
   if(pathOnly!=='/health'){res.writeHead(404).end();return;}
   if(req.headers.authorization!=='Bearer '+HUB_API_KEY){res.writeHead(401).end();return;}
   res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
-  res.end(JSON.stringify({service:'UFO Bot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:Object.values(data).filter(p=>!!p.riotId).length,rankProvider:'manual_only',autoRankSync:false}));
+  res.end(JSON.stringify({service:'UFO Bot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:null,rankProvider:'manual_only',autoRankSync:false}));
  });
  server.listen(port,'127.0.0.1',()=>console.log('Hub health bound to 127.0.0.1:'+port));
 }
@@ -87,7 +84,40 @@ function panelRows(){
   new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agent:'+group).setPlaceholder(group+' — select your mains (or clear)').setMinValues(0).setMaxValues(list.length).addOptions(list.map(a=>({label:a,value:a}))))
  );
 }
-registerCommunity(client);
+async function eraseInteraction(i,scope){
+ const uid=i.user.id,gid=i.guildId;
+ // Transaction first: Discord cleanup failures must never prevent local erasure.
+ const resources=store.eraseUser(uid,scope,gid);
+ let failures=0;
+ for(const p of resources.profiles){
+  const guild=client.guilds.cache.get(p.guildId);
+  if(!guild){failures++;continue;}
+  const member=await guild.members.fetch(uid).catch(()=>null);
+  if(!member){failures++;continue;}
+  try{
+   if(scope==='all'||scope==='riot')await updateRankRole(member,{rank:null});
+   if(scope==='all'||scope==='agents')await updateAgentRoles(member,[]);
+  }catch{failures++;}
+ }
+ for(const listing of resources.listings){
+  try{const channel=await client.channels.fetch(listing.channelId);const msg=await channel?.messages?.fetch(listing.messageId);if(msg)await msg.delete();}
+  catch{failures++;}
+ }
+ for(const room of resources.rooms){
+  try{
+   const guild=client.guilds.cache.get(room.guildId);
+   const channel=await guild?.channels.fetch(room.channelId);
+   if(channel && channel.members.size===0)await channel.delete('Owner erased UFO Bot data');
+   else if(channel)failures++;
+  }catch{failures++;}
+ }
+ const all=scope==='all';
+ return (all?'Your bot profile, XP, Riot ID/rank, agent selections, LFG and temporary-room ownership records were deleted across all bot servers.':'Your '+scope+' records in this server were deleted.')+
+  (all||scope==='xp'?' Automatic XP tracking is OFF until you use /xp-optin; only your Discord ID is retained to honor that preference.':'')+
+  (failures?' Some Discord-side roles/messages/channels could not be cleaned ('+failures+' operations); your database erasure was still completed.':'')+
+  ' Existing Discord message history and independently retained backups may require operator follow-up. /privacy explains the scope.';
+}
+registerCommunity(client,store);
 client.once('ready',()=>console.log('UFO Bot online: '+client.user.tag));
 client.on('interactionCreate',async(i)=>{
  if(!i.inGuild()) return;
@@ -101,8 +131,32 @@ client.on('interactionCreate',async(i)=>{
    put(i.guildId,i.user.id,{agents:selected});
    return i.editReply('Agent roles updated: '+(selected.join(', ')||'none'));
   }
+  if(i.isButton()&&i.customId==='erase-cancel:'+i.user.id){await i.deferUpdate();return i.editReply({content:'Deletion canceled. Nothing was changed.',components:[],embeds:[]});}
+  if(i.isButton()&&i.customId.startsWith('erase:')){
+   const [prefix,scope,requester]=i.customId.split(':');
+   if(requester!==i.user.id)return i.reply({content:'Only the requesting member can confirm this deletion.',flags:MessageFlags.Ephemeral});
+   if(!['all','riot','xp','bio','agents','lfg'].includes(scope))return;
+   await i.deferUpdate();
+   return i.editReply({content:await eraseInteraction(i,scope),components:[],embeds:[]});
+  }
   if(!i.isChatInputCommand()) return;
   const cmd=i.commandName, uid=i.user.id, entry=get(i.guildId,uid);
+  if(cmd==='erasedata'){
+   const scope=i.options.getString('scope')||'all';
+   const description=scope==='all'?'ALL your saved UFO Bot data across every Discord server using this bot':scope+' information in this server';
+   const row=new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('erase:'+scope+':'+uid).setLabel('Confirm deletion').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('erase-cancel:'+uid).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+   );
+   return i.reply({content:'**Confirm deletion of '+description+'.** This cannot be undone from the live database. After a full erase, only a minimal Discord ID is retained to prevent future automatic XP tracking. Discord messages and historical backups may require separate removal.',components:[row],flags:MessageFlags.Ephemeral});
+  }
+  if(cmd==='ping')return i.reply({content:'Pong! Discord gateway: '+(client.isReady()?'connected':'starting')+'.',flags:MessageFlags.Ephemeral});
+  if(cmd==='server-info')return i.reply({embeds:[new EmbedBuilder().setTitle(i.guild.name).setColor(0xab9bf4).addFields(
+   {name:'Members',value:String(i.guild.memberCount??'Unknown'),inline:true},
+   {name:'Server ID',value:i.guildId,inline:true},
+   {name:'XP',value:setting('xpEnabled',true)?'Enabled':'Disabled',inline:true},
+   {name:'LFG',value:setting('lfgEnabled',true)?'Enabled':'Disabled',inline:true}
+  )],flags:MessageFlags.Ephemeral});
   if(cmd==='help'){
    const guide=guideFor(i.options.getString('topic'));
    return i.reply({embeds:[new EmbedBuilder().setTitle(guide.title).setDescription(guide.description).addFields(guide.fields).setColor(0xab9bf4).setFooter({text:'UFO Bot · Community features are separate from Riot rank verification'})],flags:MessageFlags.Ephemeral});
@@ -150,20 +204,27 @@ client.on('interactionCreate',async(i)=>{
    const targetChannel=setting('lfgChannel',LFG_CHANNEL_ID||'');
    const channel=targetChannel?await i.guild.channels.fetch(targetChannel).catch(()=>null):i.channel;
    if(!channel?.isTextBased()) return i.reply({content:'LFG channel unavailable.',flags:MessageFlags.Ephemeral});
-   const previous=activeLfg.get(key(i.guildId,uid));if(previous){const old=await channel.messages.fetch(previous).catch(()=>null);if(old)await old.delete().catch(()=>{});}
+   const previous=store.getLfg(i.guildId,uid);
+   if(previous){
+    const oldChannel=await i.guild.channels.fetch(previous.channelId).catch(()=>null);
+    const old=await oldChannel?.messages.fetch(previous.messageId).catch(()=>null);
+    if(old)await old.delete().catch(()=>{});
+   }
    const p=get(i.guildId,uid),message=await channel.send({embeds:[new EmbedBuilder().setTitle('Looking for '+spots+' · '+mode).setDescription(notes).addFields({name:'Host',value:'<@'+uid+'>',inline:true},{name:'Rank',value:p.rank?(p.rank+(p.verified?' · Staff checked':' · Unverified')):'Not set',inline:true},{name:'Region',value:p.region||'Not set',inline:true},{name:'Agents',value:(p.agents||[]).join(', ')||'Not set'}).setColor(0xff4655)],allowedMentions:{parse:[]}});
-   activeLfg.set(key(i.guildId,uid),message.id);
+   try{store.saveLfg(i.guildId,uid,channel.id,message.id);}catch(error){await message.delete().catch(()=>{});throw error;}
    return i.reply({content:'LFG posted in <#'+channel.id+'>. Use /lfg-close when finished.',flags:MessageFlags.Ephemeral});
   }
   if(cmd==='lfg-close'){
-   const messageId=activeLfg.get(key(i.guildId,uid));if(!messageId)return i.reply({content:'No active listing from this bot session.',flags:MessageFlags.Ephemeral});
-   const targetChannel=setting('lfgChannel',LFG_CHANNEL_ID||'');
-   const channel=targetChannel?await i.guild.channels.fetch(targetChannel).catch(()=>null):i.channel;
-   const msg=await channel?.messages?.fetch(messageId).catch(()=>null);if(msg)await msg.delete().catch(()=>{});
-   activeLfg.delete(key(i.guildId,uid));return i.reply({content:'Listing closed.',flags:MessageFlags.Ephemeral});
+   const listing=store.getLfg(i.guildId,uid);
+   if(!listing)return i.reply({content:'You have no active saved LFG listing.',flags:MessageFlags.Ephemeral});
+   const channel=await i.guild.channels.fetch(listing.channelId).catch(()=>null);
+   const msg=await channel?.messages.fetch(listing.messageId).catch(()=>null);
+   if(msg)await msg.delete().catch(()=>{});
+   store.deleteLfg(i.guildId,uid);
+   return i.reply({content:'Your listing was closed.',flags:MessageFlags.Ephemeral});
   }
   if(cmd==='unlink'){
-   delete data[key(i.guildId,uid)];save();
+   store.deleteProfile(i.guildId,uid);
    const member=await i.guild.members.fetch(uid);await updateRankRole(member,{rank:null});await updateAgentRoles(member,[]);
    return i.reply({content:'Riot ID, rank claims and agent selections removed.',flags:MessageFlags.Ephemeral});
   }
