@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { openStore } from './store.js';
+import { openStore, levelInfo } from './store.js';
 import http from 'node:http';
 import { registerCommunity, communityCommands } from './community.js';
 import { setting } from './runtime-settings.js';
@@ -75,7 +75,7 @@ if(HUB_API_KEY){
   if(pathOnly!=='/health'){res.writeHead(404).end();return;}
   if(req.headers.authorization!=='Bearer '+HUB_API_KEY){res.writeHead(401).end();return;}
   res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
-  res.end(JSON.stringify({service:'UFO Bot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:null,rankProvider:'manual_only',autoRankSync:false}));
+  res.end(JSON.stringify({service:'UFO Bot',status:client.isReady()?'online':'starting',uptimeSeconds:Math.floor((Date.now()-bootedAt)/1000),guilds:client.guilds.cache.size,linkedProfiles:store.countLinkedProfiles(),rankProvider:'manual_only',autoRankSync:false}));
  });
  server.listen(port,'127.0.0.1',()=>console.log('Hub health bound to 127.0.0.1:'+port));
 }
@@ -258,13 +258,16 @@ client.on('interactionCreate',async(i)=>{
   if(cmd==='profile'){
    const target=i.options.getUser('user')||i.user, p=get(i.guildId,target.id);
    const lookupStatus=p.accountFound?'Identifier found via Riot API (ownership not verified)':'Not checked / not available';
+   const experience=levelInfo(store.getXP(i.guildId,target.id).xp);
+   const remaining=experience.next-experience.xp;
    const embed=new EmbedBuilder().setTitle('VALORANT · '+target.username).setColor(0xab9bf4)
     .addFields(
      {name:'Riot ID (self-entered)',value:p.riotId||'Not linked',inline:true},
      {name:'Region',value:p.region||'Not set',inline:true},
      {name:'ID lookup',value:p.riotId?lookupStatus:'No linked ID'},
      {name:'Rank',value:p.rank?p.rank+' · '+(p.verified?'Staff checked (not Riot verified)':'Unverified claim'):'Not supplied'},
-     {name:'Agent mains',value:(p.agents||[]).join(', ')||'None'}
+     {name:'Agent mains',value:(p.agents||[]).join(', ')||'None'},
+     {name:'Server XP',value:experience.xp.toLocaleString()+' XP · Level '+experience.level+' · '+remaining.toLocaleString()+' XP to next level'}
     ).setFooter({text:'Riot ID lookup does not authenticate ownership. Competitive ranks are not API-verified.'});
    return i.reply({embeds:[embed],flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
   }
