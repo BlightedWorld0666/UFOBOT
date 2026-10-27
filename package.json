@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "start": "node src/bot.js",
-    "check": "node --check src/bot.js && node --check src/community.js && node --check src/runtime-settings.js && node --check src/data-dir.js && node --check src/riot-account.js && node --check src/bot-guide.js && node --check src/dashboard.js && node --check dashboard/app.js && npm test",
+    "check": "node --check src/bot.js && node --check src/community.js && node --check src/runtime-settings.js && node --check src/data-dir.js && node --check src/store.js && node --check scripts/migrate-json-to-sqlite.js && node --check src/riot-account.js && node --check src/bot-guide.js && node --check src/dashboard.js && node --check dashboard/app.js && npm test",
     "dashboard": "node src/dashboard.js",
     "admin:setup": "node scripts/create-admin-credentials.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "data:plan": "node scripts/migrate-json-to-sqlite.js",
+    "data:migrate": "node scripts/migrate-json-to-sqlite.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.16.0"
   },
   "dependencies": {
     "discord.js": "^14.19.3",

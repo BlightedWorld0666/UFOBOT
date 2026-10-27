@@ -2,3 +2,11 @@ node_modules/
 .env
 data/
 *.log
+
+# Local database and SQLite write-ahead log files (never commit personal data)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
