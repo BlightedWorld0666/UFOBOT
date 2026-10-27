@@ -23,8 +23,8 @@ export function openStore(filename=path.join(resolveBotDataDir(),'ufobot.sqlite'
  db.exec('CREATE TABLE IF NOT EXISTS voice_rooms (channel_id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,owner_id TEXT NOT NULL,created_at INTEGER NOT NULL)');
  db.exec('CREATE TABLE IF NOT EXISTS xp_optout (user_id TEXT PRIMARY KEY)');
  db.exec('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY,applied_at INTEGER NOT NULL)');
- const one=(q,...args)=>db.prepare(q).get(...args);
- const all=(q,...args)=>db.prepare(q).all(...args);
+ const one=(q,...args)=>{const row=db.prepare(q).get(...args);return row?{...row}:undefined;};
+ const all=(q,...args)=>db.prepare(q).all(...args).map(row=>({...row}));
  const run=(q,...args)=>db.prepare(q).run(...args);
  function tx(fn){db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}
  const api={
