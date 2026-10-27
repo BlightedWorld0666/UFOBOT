@@ -2,8 +2,27 @@
 
 A custom, self-hosted Discord bot for agent roles, Riot ID associations, manually claimed rank roles, profiles and explicit unlinking.
 
+## SQLite progression, bot data and user privacy (review-only upgrade)
+
+**New runtime prerequisite: Node.js 22.16+** (built-in `node:sqlite`). Before deploying this version, confirm that the Windows Hub's installed Node runtime supports it. Older Node 20 bot versions remain unaffected until this draft is approved and installed.
+
+The bot now keeps player Riot ID associations and separately labeled rank claims, agent selections, XP/bios, LFG listing references and temporary voice ownership in a private SQLite database at `BLIGHTED_BOT_DATA_DIR/ufobot.sqlite`. Both bot and private dashboard must point to the intended absolute `BLIGHTED_BOT_DATA_DIR` path. SQLite uses write-ahead logging. Protect database, WAL and SHM files together when backing up or restoring. This data must never be committed or served publicly. Only the running bot writes member records; dashboard configuration remains separate in `dashboard.json`.
+
+**STOP before upgrading an existing JSON-based installation.** The new bot refuses startup if `members.json` or `community.json` exists without a completed SQLite migration. The old data will NOT be silently ignored or deleted.
+
+1. Stop the existing bot to freeze writes; inventory the real `BLIGHTED_BOT_DATA_DIR`, host runtime, backups and rollback path.
+2. Run `npm run data:plan` (dry run, no changes) to count legacy members/XP/rooms.
+3. Choose a secure **absolute** backup directory OUTSIDE the bot data folder and run `npm run data:migrate -- --apply --backup-dir /absolute/private/backups` **only after operator approval**. The migrator copies JSON files into a protected new backup subdirectory, then imports once transactionally; it doesn't remove JSON originals. It refuses any second import, which also protects previously erased user records from being recreated by a stale backup.
+4. Check migration results and SQLite content in a separate staging install first; restart the new bot only after the backups and Node version are verified. Preserve the previous binary/source and reversible host plan. Keep original JSON/backup retention under operator policy rather than deleting silently.
+
+**Commands:** `/xp` shows a per-server level, progress bar and next-level requirements; the cooldown persists through bot restarts. `/leaderboard` reads stored server XP. `/setbio`, `/server-profile`, `/lfg`, `/lfg-close`, `/tempvoice` and `/tempvoice-close` persist through restarts. `/ping` and `/server-info` provide utility information.
+
+**Privacy / erasure:** `/erasedata` starts an **ephemeral button-confirmed** deletion. Default scope `all` deletes the requester's stored identity, rank labels, agent preferences, XP, bio, listings and voice-room ownership records across all Discord servers using this bot. Optional `scope:riot|xp|bio|agents|lfg` removes only that category in the current server. The bot attempts to clean related Discord roles, listing messages and empty voice rooms; if Discord refuses, it reports partial cleanup rather than pretending external content disappeared. A full deletion intentionally keeps only the user's Discord ID in the private XP opt-out table, to stop messages from immediately collecting new XP. `/xp-optin` removes that marker. `/xp-optout` preserves existing XP while stopping new collection. `/privacy` explains the limits. Existing posted Discord messages, off-host backups, manually exported files and Riot-side information are NOT deleted by a bot slash command. **No Riot OAuth tokens/RSO are present to revoke**; erasing the local Riot ID association is not external Riot account revocation.
+
+**Security:** The development Riot key is optional and expires daily; no unofficial stat collection or automated Riot-verified ranks. No live key, Discord runtime or Windows Hub changes were performed for this draft.
+
 ## Quick start
-1. Install Node.js 20 or later.
+1. Install Node.js 22.16 or later for this SQLite-backed version. Verify host compatibility before upgrading.
 2. Create an application + bot at https://discord.com/developers/applications and copy the bot token and application (client) ID.
 3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`, with **Manage Roles**, **Send Messages**, and **Use Application Commands**.
 4. Place the bot's Discord role **above** the roles it should assign.
