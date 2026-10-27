@@ -97,6 +97,9 @@ export function openStore(filename=path.join(resolveBotDataDir(),'ufobot.sqlite'
     return found;
    });
   },
+  hasActiveData(){
+   return ['profiles','xp_profiles','lfg','voice_rooms','xp_optout'].some(table=>one('SELECT COUNT(*) AS n FROM '+table).n>0);
+  },
   legacyPending(dir=resolveBotDataDir()){
    return !one('SELECT 1 FROM migrations WHERE name=?','legacy_json_v1')&&
     ['members.json','community.json'].some(f=>fs.existsSync(path.join(dir,f)));
