@@ -12,6 +12,14 @@ A custom, self-hosted Discord bot for agent roles, Riot ID associations, manuall
 
 **Never commit .env, bot tokens, API keys or player databases.**
 
+## New bot guidance and Riot developer-key behavior
+
+- `/help [topic]` provides clear command documentation for identity, squads, progression and staff safety. `/bot-status` shows Discord gateway readiness, configurable community controls and **configured vs verified** Riot API state; it never shows or tests the key.
+- A Riot **development** API key from the Riot Developer Portal expires after **24 hours**. When the key is missing, expired, denied access, rate-limited or upstream calls fail, `/link` still allows the player to save a **self-entered, unverified** Riot ID; the bot labels why lookup was skipped. `/sync` preserves linked data/roles when the lookup fails. Successful account-ID lookup is **not** ownership verification, OAuth consent or automatic competitive-rank verification.
+- Riot's current VALORANT policy does not offer personal keys and production player-data/RSO access requires Riot approval, a registered product, player opt-in and a functioning verified public website. Do not claim official ranks, use unofficial scraping, or build auto-refresh around a developer token. Replace or regenerate keys **privately on the host** and restart the bot when its environment changes. The encrypted dashboard vault is not wired to the bot process.
+- `/verify-rank` and `/setup-agents` now check staff permissions at runtime as well as command registration. Staff rank checks are human attestations, **not** Riot verification.
+- Use `npm run check` for syntax and offline mock Riot-response tests. No live key or Discord connection is needed for these tests.
+
 ## Commands
 - `/setup-agents` (staff) — post 4 multi-select menus for agent mains.
 - `/link riot_id:Player#NA1 region:americas` — save Riot ID; optionally look up ID when authorized Riot API key is configured. **Does not prove ownership**.

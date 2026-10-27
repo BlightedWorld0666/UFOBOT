@@ -5,6 +5,8 @@ import { resolveBotDataDir } from './data-dir.js';
 import http from 'node:http';
 import { registerCommunity, communityCommands } from './community.js';
 import { setting } from './runtime-settings.js';
+import { lookupRiotAccount } from './riot-account.js';
+import { guideFor, riotLookupExplanation, riotKeySummary } from './bot-guide.js';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, RIOT_API_KEY, HUB_API_KEY, RANK_LOG_CHANNEL_ID, LFG_CHANNEL_ID } = process.env;
@@ -29,6 +31,8 @@ const rankValues=tiers.flatMap(t=>t==='Radiant'?[t]:[1,2,3].map(n=>t+' '+n));
 const rankChoices=rankValues.map(n=>({name:n,value:n}));
 const lfgModes=['Competitive','Unrated','Swiftplay','Premier','Deathmatch'];
 const commands=[
+ new SlashCommandBuilder().setName('help').setDescription('Explore UFO Bot commands and privacy boundaries').addStringOption(o=>o.setName('topic').setDescription('Help category').addChoices({name:'Overview',value:'overview'},{name:'Identity & rank',value:'identity'},{name:'LFG & voice',value:'squad'},{name:'XP & profiles',value:'progress'},{name:'Staff & safety',value:'staff'})),
+ new SlashCommandBuilder().setName('bot-status').setDescription('See Discord, community settings, and Riot API readiness'),
  new SlashCommandBuilder().setName('setup-agents').setDescription('Post persistent agent selection menus').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
  new SlashCommandBuilder().setName('link').setDescription('Attach a Riot ID to your Discord profile (not ownership verification)').addStringOption(o=>o.setName('riot_id').setDescription('YourName#TAG').setRequired(true)).addStringOption(o=>o.setName('region').setDescription('Account routing region').addChoices({name:'Americas',value:'americas'},{name:'Europe',value:'europe'},{name:'Asia',value:'asia'})),
  new SlashCommandBuilder().setName('unlink').setDescription('Remove your associated Riot ID and claimed rank'),
@@ -40,16 +44,6 @@ const commands=[
  new SlashCommandBuilder().setName('verify-rank').setDescription('Staff: mark a member rank verified after independently checking evidence').setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles).addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)).addStringOption(o=>o.setName('rank').setDescription('Verified rank').setRequired(true).addChoices(...rankChoices))
 ].map(c=>c.toJSON()).concat(communityCommands);
 
-const apiAccount=async(id,region)=>{
- if(!RIOT_API_KEY) return {status:'unavailable'};
- const [gameName,tagLine]=id.split('#');
- const url='https://'+region+'.api.riotgames.com/riot/account/v1/accounts/by-riot-id/'+encodeURIComponent(gameName)+'/'+encodeURIComponent(tagLine);
- const resp=await fetch(url,{headers:{'X-Riot-Token':RIOT_API_KEY},signal:AbortSignal.timeout(8000)});
- if(resp.status===404) return {status:'not_found'};
- if(!resp.ok) return {status:'error',code:resp.status};
- const obj=await resp.json();
- return {status:'found',id:obj.gameName+'#'+obj.tagLine,puuid:obj.puuid};
-};
 async function ensureRole(guild,name){
  const existing=guild.roles.cache.find(r=>r.name===name);
  if(existing) return existing;
@@ -109,7 +103,28 @@ client.on('interactionCreate',async(i)=>{
   }
   if(!i.isChatInputCommand()) return;
   const cmd=i.commandName, uid=i.user.id, entry=get(i.guildId,uid);
+  if(cmd==='help'){
+   const guide=guideFor(i.options.getString('topic'));
+   return i.reply({embeds:[new EmbedBuilder().setTitle(guide.title).setDescription(guide.description).addFields(guide.fields).setColor(0xab9bf4).setFooter({text:'UFO Bot · Community features are separate from Riot rank verification'})],flags:MessageFlags.Ephemeral});
+  }
+  if(cmd==='bot-status'){
+   const on=name=>setting(name,true)?'Enabled':'Disabled';
+   const details=new EmbedBuilder().setTitle('UFO Bot · Connection & Capabilities').setColor(0xab9bf4)
+    .setDescription('Read-only overview of this running process. It does not test Riot credentials or the Windows Hub.')
+    .addFields(
+     {name:'Discord gateway',value:client.isReady()?'Connected':'Connecting / unavailable',inline:true},
+     {name:'XP',value:on('xpEnabled'),inline:true},
+     {name:'LFG',value:on('lfgEnabled'),inline:true},
+     {name:'Agent selection',value:on('agentRoles'),inline:true},
+     {name:'Rank claims',value:on('rankClaims'),inline:true},
+     {name:'Riot API',value:riotKeySummary(Boolean(RIOT_API_KEY))},
+     {name:'Rank trust model',value:'Manual member claims or independent staff checks only. No official rank auto-sync or Riot account ownership verification.'},
+     {name:'Help & privacy',value:'Use /help for all commands. /unlink and /reset-profile remove different categories of user data.'}
+    );
+   return i.reply({embeds:[details],flags:MessageFlags.Ephemeral});
+  }
   if(cmd==='setup-agents'){
+   if(!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return i.reply({content:'Manage Server permission is required.',flags:MessageFlags.Ephemeral});
    if(!setting('agentRoles',true))return i.reply({content:'Agent selections are disabled in the dashboard.',flags:MessageFlags.Ephemeral});
    await i.channel.send({embeds:[new EmbedBuilder().setTitle('Choose your VALORANT agents').setDescription('Pick multiple agent mains in each class. Re-select to update; clear a class to remove those roles.').setColor(0xff4655)],components:panelRows()});
    return i.reply({content:'Agent selection panel posted.',flags:MessageFlags.Ephemeral});
@@ -118,13 +133,16 @@ client.on('interactionCreate',async(i)=>{
    const id=i.options.getString('riot_id').trim(), region=i.options.getString('region')||'americas';
    if(!/^[^#\n]{3,16}#[^#\n]{3,5}$/.test(id)) return i.reply({content:'Use a Riot ID such as Player#NA1 (3–16 character name and 3–5 character tag).',flags:MessageFlags.Ephemeral});
    await i.deferReply({flags:MessageFlags.Ephemeral});
-   let lookup;try{lookup=await apiAccount(id,region);}catch{lookup={status:'error'};}
-   if(lookup.status==='not_found') return i.editReply('Riot ID not found. Check spelling and region.');
-   if(lookup.status==='error') return i.editReply('Riot account lookup unavailable right now. Try again later; nothing was changed.');
-   const linked=lookup.status==='found'?lookup.id:id;
-   put(i.guildId,uid,{riotId:linked,region,puuid:lookup.puuid||null,accountFound:lookup.status==='found',verified:false,rank:null});
+   const lookup=await lookupRiotAccount({riotId:id,region,apiKey:RIOT_API_KEY});
+   if(lookup.status==='not_found')return i.editReply('Riot ID not found by the account lookup. Check the spelling and region; nothing was changed.');
+   if(lookup.status==='invalid_input')return i.editReply('Invalid Riot ID or region; nothing was changed.');
+   const found=lookup.status==='found',linked=found?lookup.id:id;
+   put(i.guildId,uid,{riotId:linked,region,puuid:found?lookup.puuid:null,accountFound:found,lastAccountLookupAt:found?Date.now():null,verified:false,rank:null});
    await updateRankRole(await i.guild.members.fetch(uid),{rank:null});
-   return i.editReply('Linked '+linked+'. '+(lookup.status==='found'?'Riot ID was found, but **account ownership is NOT verified**.':'ID saved without lookup; **ownership is NOT verified**.')+' Use /claim-rank to set an unverified rank. /unlink removes your association.');
+   const note=found
+    ? 'Riot Account API found that ID, but **this does NOT verify account ownership or rank**.'
+    : riotLookupExplanation(lookup.status)+' **This is a self-entered ID, not ownership or rank verification.**';
+   return i.editReply({content:'Saved Riot ID: '+linked+'. '+note+' Use /claim-rank for an unverified claim, or /unlink to remove the association.',allowedMentions:{parse:[]}});
   }
   if(cmd==='lfg'){
    if(!setting('lfgEnabled',true))return i.reply({content:'Looking-for-group is disabled in the dashboard.',flags:MessageFlags.Ephemeral});
@@ -157,6 +175,7 @@ client.on('interactionCreate',async(i)=>{
    return i.reply({content:'Claimed '+rank+'. You have **Unverified Rank** until a trusted verification is performed.',flags:MessageFlags.Ephemeral});
   }
   if(cmd==='verify-rank'){
+   if(!i.memberPermissions?.has(PermissionFlagsBits.ManageRoles))return i.reply({content:'Manage Roles permission is required for staff checks.',flags:MessageFlags.Ephemeral});
    const user=i.options.getUser('user'),record=get(i.guildId,user.id);
    if(!record.riotId) return i.reply({content:'That member has not linked an ID.',flags:MessageFlags.Ephemeral});
    const rank=i.options.getString('rank');put(i.guildId,user.id,{rank,verified:true,verifiedBy:uid});
@@ -167,13 +186,26 @@ client.on('interactionCreate',async(i)=>{
   if(cmd==='sync'){
    if(!entry.riotId) return i.reply({content:'First use /link.',flags:MessageFlags.Ephemeral});
    await i.deferReply({flags:MessageFlags.Ephemeral});
-   let r;try{r=await apiAccount(entry.riotId,entry.region||'americas');}catch{r={status:'error'};}
-   if(r.status==='found'){put(i.guildId,uid,{puuid:r.puuid,accountFound:true});return i.editReply('Riot ID found again. **Ownership and competitive rank are not verified.** Official rank auto-sync requires a supported, authorized provider.');}
-   return i.editReply('Account lookup '+(r.status==='unavailable'?'is not configured.':r.status==='not_found'?'did not find this ID.':'failed.')+' Your role was not changed.');
+   const lookup=await lookupRiotAccount({riotId:entry.riotId,region:entry.region||'americas',apiKey:RIOT_API_KEY});
+   if(lookup.status==='found'){
+    put(i.guildId,uid,{puuid:lookup.puuid,accountFound:true,lastAccountLookupAt:Date.now()});
+    return i.editReply('Riot Account API found that ID again. **It does NOT prove ownership or competitive rank.** No rank role was changed.');
+   }
+   const note=lookup.status==='not_found'?'Riot Account API could not find that ID.':riotLookupExplanation(lookup.status);
+   return i.editReply(note+' Your stored ID and rank roles were not changed.');
   }
   if(cmd==='profile'){
    const target=i.options.getUser('user')||i.user, p=get(i.guildId,target.id);
-   return i.reply({embeds:[new EmbedBuilder().setTitle('Valorant · '+target.username).addFields({name:'Riot ID',value:p.riotId||'Not linked',inline:true},{name:'Rank',value:p.rank? p.rank+' ('+(p.verified?'Staff verified':'Unverified claim')+')':'Not supplied',inline:true},{name:'Agents',value:(p.agents||[]).join(', ')||'None'}).setColor(0xff4655)],flags:MessageFlags.Ephemeral});
+   const lookupStatus=p.accountFound?'Identifier found via Riot API (ownership not verified)':'Not checked / not available';
+   const embed=new EmbedBuilder().setTitle('VALORANT · '+target.username).setColor(0xab9bf4)
+    .addFields(
+     {name:'Riot ID (self-entered)',value:p.riotId||'Not linked',inline:true},
+     {name:'Region',value:p.region||'Not set',inline:true},
+     {name:'ID lookup',value:p.riotId?lookupStatus:'No linked ID'},
+     {name:'Rank',value:p.rank?p.rank+' · '+(p.verified?'Staff checked (not Riot verified)':'Unverified claim'):'Not supplied'},
+     {name:'Agent mains',value:(p.agents||[]).join(', ')||'None'}
+    ).setFooter({text:'Riot ID lookup does not authenticate ownership. Competitive ranks are not API-verified.'});
+   return i.reply({embeds:[embed],flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
   }
  }catch(e){console.error(e);if(i.deferred||i.replied)await i.editReply('Command failed. Check that my role is above the roles I manage and that I have Manage Roles.').catch(()=>{});else await i.reply({content:'Command failed. Check bot role permissions.',flags:MessageFlags.Ephemeral}).catch(()=>{});}
 });
