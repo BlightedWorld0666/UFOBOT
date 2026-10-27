@@ -17,6 +17,7 @@ test('persistent profile, XP, bio and deterministic level boundaries',t=>{
  store.putProfile(G1,U,{riotId:'Player#NA1',rank:'Gold 2',agents:['Sova'],verified:false});
  store.setBio(G1,U,'Hello world');
  assert.equal(store.getProfile(G1,U).rank,'Gold 2');
+ assert.equal(store.countLinkedProfiles(),1);
  assert.equal(store.getXP(G1,U).bio,'Hello world');
  assert.equal(store.awardXP(G1,U,50,60,100000).awarded,true);
  assert.equal(store.awardXP(G1,U,50,60,101000).reason,'cooldown');
