@@ -7,7 +7,7 @@ export const guideTopics = {
       { name: 'Identity', value: '/link · /profile · /claim-rank · /sync · /unlink' },
       { name: 'Find a squad', value: '/lfg · /lfg-close · /tempvoice · /tempvoice-close' },
       { name: 'Community', value: '/xp · /leaderboard · /setbio · /server-profile · /reset-profile' },
-      { name: 'Utilities', value: '/help topic:… · /bot-status' }
+      { name: 'Utilities', value: '/help topic:… · /bot-status · /ping · /server-info · /privacy · /erasedata' }
     ]
   },
   identity: {
@@ -36,7 +36,7 @@ export const guideTopics = {
     fields: [
       { name: 'Progression', value: '/xp [user] — see level and XP. /leaderboard — see the server leaderboard.' },
       { name: 'Player bio', value: '/setbio bio:… — set a public Discord-server bio. /server-profile [user] displays it.' },
-      { name: 'Delete community data', value: '/reset-profile — delete your XP and bio. /unlink separately clears Riot association and rank roles.' }
+      { name: 'Delete community data', value: '/reset-profile — delete XP and bio and stop passive XP collection. /erasedata offers full or category-specific deletion with confirmation.' }
     ]
   },
   staff: {
