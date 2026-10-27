@@ -57,6 +57,9 @@ export function openStore(filename=path.join(resolveBotDataDir(),'ufobot.sqlite'
    const bio=String(value||'').replace(/[\r\n]/g,' ').slice(0,160);
    run('INSERT INTO xp_profiles(guild_id,user_id,bio) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET bio=excluded.bio',...keys(g,u),bio);
   },
+  countLinkedProfiles(){
+   return Number(one("SELECT COUNT(*) AS count FROM profiles WHERE json_extract(payload,'$.riotId') IS NOT NULL").count);
+  },
   leaderboard(g,limit=10){
    return all('SELECT user_id,xp FROM xp_profiles WHERE guild_id=? AND xp>0 ORDER BY xp DESC,user_id ASC LIMIT ?',String(g),Math.max(1,Math.min(limit,25))).map(v=>({userId:v.user_id,xp:Number(v.xp)}));
   },
